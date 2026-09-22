@@ -372,7 +372,9 @@ class AppAgent(BasicAgent):
         :param context: The context.
         """
         if not self._context_provision_executed:
-            await self.context_provision(context=context)
+            await self.context_provision(
+                request=context.get(ContextNames.REQUEST), context=context
+            )
             self._context_provision_executed = True
 
         if not self._processor_cls:

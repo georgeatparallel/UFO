@@ -10,6 +10,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from langchain.docstore.document import Document
 
 from config.config_loader import ConfigLoader
+from ufo.module.context import Context, ContextNames
 from ufo.rag import retriever, web_search
 from ufo.rag.web_search import ParallelSearchWeb
 
@@ -175,7 +176,7 @@ def test_online_retriever_routes_explicit_parallel_selection(monkeypatch):
     assert calls == [("parallel", "current UFO docs", 2)]
 
 
-def test_app_agent_online_search_uses_parallel_from_async_context(monkeypatch):
+def test_app_agent_process_uses_parallel_from_session_request(monkeypatch):
     from ufo.agents.agent.app_agent import AppAgent
 
     server = FastMCP("parallel-search-app-agent-test")
@@ -198,6 +199,16 @@ def test_app_agent_online_search_uses_parallel_from_async_context(monkeypatch):
         def __init__(self):
             self.transport = server
 
+    class NoopProcessor:
+        def __init__(self, agent, global_context):
+            self.processing_context = self
+
+        async def process(self):
+            pass
+
+        def get_local(self, key):
+            return None
+
     monkeypatch.setattr(web_search, "ParallelSearchWeb", LocalParallelSearchWeb)
     monkeypatch.setattr(web_search.ufo_config.rag, "online_search", True)
     monkeypatch.setattr(web_search.ufo_config.rag, "online_search_provider", "parallel")
@@ -210,8 +221,13 @@ def test_app_agent_online_search_uses_parallel_from_async_context(monkeypatch):
     agent = AppAgent.__new__(AppAgent)
     agent.retriever_factory = retriever.RetrieverFactory()
     agent._load_mcp_context = AsyncMock()
+    agent._context_provision_executed = False
+    agent._processor_cls = NoopProcessor
 
-    asyncio.run(agent.context_provision("UFO docs"))
+    context = Context()
+    context.set(ContextNames.REQUEST, "UFO docs")
+
+    asyncio.run(agent.process(context))
 
     assert calls == [["UFO docs"]]
     assert agent.online_doc_retriever.indexer == [
