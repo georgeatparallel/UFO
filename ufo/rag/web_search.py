@@ -79,7 +79,9 @@ class ParallelSearchWeb:
         """Convert attributed Parallel excerpts into UFO RAG documents."""
         return [
             Document(
-                page_content=result["snippet"],
+                page_content=(
+                    f"{result['name']}\nSource: {result['url']}\n\n{result['snippet']}"
+                ),
                 metadata={
                     "url": result["url"],
                     "name": result["name"],

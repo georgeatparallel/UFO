@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -11,6 +12,7 @@ from langchain.docstore.document import Document
 
 from config.config_loader import ConfigLoader
 from ufo.module.context import Context, ContextNames
+from ufo.prompter.basic import BasicPrompter
 from ufo.rag import retriever, web_search
 from ufo.rag.web_search import ParallelSearchWeb
 
@@ -67,7 +69,10 @@ def test_parallel_search_invokes_web_search_and_surfaces_evidence():
     ]
     assert search.create_documents(results) == [
         Document(
-            page_content="Useful attributed evidence.",
+            page_content=(
+                "UFO documentation\nSource: https://example.com/ufo\n\n"
+                "Useful attributed evidence."
+            ),
             metadata={
                 "name": "UFO documentation",
                 "url": "https://example.com/ufo",
@@ -232,7 +237,10 @@ def test_app_agent_process_uses_parallel_from_session_request(monkeypatch):
     assert calls == [["UFO docs"]]
     assert agent.online_doc_retriever.indexer == [
         Document(
-            page_content="Instructions for the requested task.",
+            page_content=(
+                "Current UFO guide\nSource: https://example.com/guide\n\n"
+                "Instructions for the requested task."
+            ),
             metadata={
                 "url": "https://example.com/guide",
                 "name": "Current UFO guide",
@@ -240,3 +248,15 @@ def test_app_agent_process_uses_parallel_from_session_request(monkeypatch):
             },
         )
     ]
+
+    stored_documents = agent.online_doc_retriever.indexer
+    agent.online_doc_retriever.indexer = SimpleNamespace(
+        similarity_search=lambda query, top_k, filter=None: stored_documents
+    )
+    agent.offline_doc_retriever = None
+    agent.prompter = BasicPrompter
+    _, online_prompt = agent.external_knowledge_prompt_helper("UFO docs", 1, 1)
+
+    assert "Instructions for the requested task." in online_prompt
+    assert "Current UFO guide" in online_prompt
+    assert "https://example.com/guide" in online_prompt
