@@ -4,6 +4,7 @@
 import asyncio
 import json
 import logging
+import httpx
 import requests
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -60,7 +61,7 @@ class ParallelSearchWeb:
             return []
         try:
             results = asyncio.run(self._search(query.strip()))
-        except (RuntimeError, ValueError, json.JSONDecodeError) as error:
+        except (RuntimeError, ValueError, httpx.HTTPError) as error:
             logger.warning("Error when searching with Parallel: %s", error)
             return None
 

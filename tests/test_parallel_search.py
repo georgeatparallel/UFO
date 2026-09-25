@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from langchain.docstore.document import Document
@@ -148,6 +149,31 @@ def test_online_retriever_keeps_bing_as_default(monkeypatch):
 
     assert online.indexer == "bing-index"
     assert calls == [("bing", "current UFO docs", 2)]
+
+
+@pytest.mark.parametrize("status_code", [429, 503])
+def test_parallel_http_failure_leaves_online_retriever_empty(monkeypatch, status_code):
+    async def reject_request(scope, receive, send):
+        await send({"type": "http.response.start", "status": status_code, "headers": []})
+        await send({"type": "http.response.body", "body": b"Search unavailable"})
+
+    def client_factory(headers=None, timeout=None, auth=None):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=reject_request),
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+        )
+
+    search = ParallelSearchWeb("http://parallel.test/mcp")
+    search.transport.httpx_client_factory = client_factory
+    monkeypatch.setattr(web_search, "ParallelSearchWeb", lambda: search)
+    monkeypatch.setattr(web_search.ufo_config.rag, "online_search_provider", "parallel")
+
+    online = retriever.OnlineDocRetriever("current UFO docs", top_k=1)
+
+    assert online.indexer is None
+    assert online.retrieve("current UFO docs", top_k=1) == []
 
 
 def test_online_retriever_routes_explicit_parallel_selection(monkeypatch):
