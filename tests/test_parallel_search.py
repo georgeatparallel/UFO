@@ -7,9 +7,11 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastmcp import FastMCP
+from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from langchain.docstore.document import Document
+from mcp.shared.exceptions import McpError
+from mcp.types import CallToolRequest, ErrorData
 
 from config.config_loader import ConfigLoader
 from ufo.module.context import Context, ContextNames
@@ -205,6 +207,54 @@ def test_online_retriever_routes_explicit_parallel_selection(monkeypatch):
 
     assert online.indexer == "parallel-index"
     assert calls == [("parallel", "current UFO docs", 2)]
+
+
+def test_parallel_protocol_failure_leaves_online_retriever_empty(monkeypatch):
+    server = FastMCP("parallel-search-protocol-error-test")
+
+    async def reject_tool_call(request):
+        raise McpError(ErrorData(code=-32603, message="Temporary server error"))
+
+    server._mcp_server.request_handlers[CallToolRequest] = reject_tool_call
+    search = ParallelSearchWeb()
+    search.transport = server
+    monkeypatch.setattr(web_search, "ParallelSearchWeb", lambda: search)
+    monkeypatch.setattr(web_search.ufo_config.rag, "online_search_provider", "parallel")
+
+    online = retriever.OnlineDocRetriever("current UFO docs", top_k=1)
+
+    assert online.indexer is None
+    assert online.retrieve("current UFO docs", top_k=1) == []
+
+
+@pytest.mark.parametrize("failure", ["tool_error", "invalid_payload", "timeout"])
+def test_parallel_native_failures_return_no_evidence(monkeypatch, failure):
+    server = FastMCP("parallel-search-failure-test")
+
+    @server.tool(name="web_search")
+    async def handle_search(objective: str, search_queries: list[str]):
+        if failure == "tool_error":
+            raise ValueError("Search temporarily unavailable")
+        if failure == "timeout":
+            await asyncio.sleep(1)
+        return "invalid JSON"
+
+    if failure == "timeout":
+        monkeypatch.setattr(
+            web_search, "Client", lambda transport: Client(transport, timeout=0.01)
+        )
+    search = ParallelSearchWeb()
+    search.transport = server
+
+    assert search.search("current UFO docs") is None
+
+
+def test_parallel_search_preserves_cancellation(monkeypatch):
+    search = ParallelSearchWeb()
+    monkeypatch.setattr(search, "_search", AsyncMock(side_effect=asyncio.CancelledError))
+
+    with pytest.raises(asyncio.CancelledError):
+        search.search("current UFO docs")
 
 
 def test_app_agent_process_uses_parallel_from_session_request(monkeypatch):

@@ -8,6 +8,7 @@ import httpx
 import requests
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from mcp.shared.exceptions import McpError
 from langchain.docstore.document import Document
 from langchain.text_splitter import HTMLHeaderTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -61,7 +62,7 @@ class ParallelSearchWeb:
             return []
         try:
             results = asyncio.run(self._search(query.strip()))
-        except (RuntimeError, ValueError, httpx.HTTPError) as error:
+        except (RuntimeError, ValueError, httpx.HTTPError, McpError) as error:
             logger.warning("Error when searching with Parallel: %s", error)
             return None
 
